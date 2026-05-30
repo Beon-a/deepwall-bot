@@ -2,6 +2,7 @@ import logging
 import os
 import asyncio
 import threading
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
@@ -15,11 +16,22 @@ logger = logging.getLogger(__name__)
 
 active_users = {}
 
+# Хардкод серверов — обновлять при смене подписки OneConnect
+SERVERS_JSON = '[{"id":"238","serverName":"AU-Melbourne","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote aus-melbourne.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"Australia","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/au.png","vpnUserName":"l4R0w8m7C6i4G0qp","vpnUserPassword":"DFrF^V4NAbWQv6Lv#Gbd"},{"id":"271","serverName":"KR-Seoul","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote japan.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"Korea, Republic of","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/kr.png","vpnUserName":"B4s0L8x7O6V440Zp","vpnUserPassword":"!FIF0ViNmbOQ46jvVGrd"},{"id":"311","serverName":"CA-Toronto","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote ca-toronto.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"Canada","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/ca.png","vpnUserName":"D4Q06887f6B4A0Jp","vpnUserPassword":"hFkFwV4N3brQX67vDG9d"},{"id":"356","serverName":"JP-Tokyo","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote japan.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"Japan","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/jp.png","vpnUserName":"O4Y0N8a7u624o0#p","vpnUserPassword":"zFjFBV3NlbnQa67vsGkd"},{"id":"397","serverName":"CA-Toronto Pro","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote ca-toronto.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"Canada","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/ca.png","vpnUserName":"D4Q06887f6B4A0Jp","vpnUserPassword":"hFkFwV4N3brQX67vDG9d"},{"id":"309","serverName":"US-Seattle","ovpnConfiguration":"client\r\ndev tun0\r\nproto udp\r\nremote us-seattle.privacy.network 1197\r\nresolv-retry infinite\r\nnobind\r\npersist-key\r\npersist-tun\r\ndata-ciphers AES-128-CBC:AES-128-GCM:AES-256-GCM\r\ndata-ciphers-fallback AES-128-CBC\r\nauth sha1\r\ntls-client\r\nremote-cert-tls server\r\npull-filter ignore \"route-ipv6\"\r\npull-filter ignore \"ifconfig-ipv6\"\r\nauth-user-pass\r\ncompress\r\nverb 1\r\nreneg-sec 0\r\nauth-user-pass\r\n","country":"United States","flag_url":"https://raw.githubusercontent.com/oneconnectapi/flag-sdk/main/us.png","vpnUserName":"l4R0w8m7C6i4G0qp","vpnUserPassword":"DFrF^V4NAbWQv6Lv#Gbd"}]'
+
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"DeepWall Bot is running")
+        if self.path == '/servers':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(SERVERS_JSON.encode('utf-8'))
+        else:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"DeepWall Bot is running")
+
     def log_message(self, format, *args):
         pass
 
@@ -116,15 +128,12 @@ async def run_bot():
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
-    # Держим бота живым
     while True:
         await asyncio.sleep(3600)
 
 def main():
-    # Веб-сервер в отдельном потоке
     threading.Thread(target=run_web_server, daemon=True).start()
     logger.info(f"Web server started on port {PORT}")
-    # Бот в главном event loop
     asyncio.run(run_bot())
 
 if __name__ == "__main__":
